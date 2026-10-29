@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>모스 부호 변환기</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: one narrow column like a telegraph slip: controls on top, message in, message out, reference chart folded below. */
+:root {
+  --bg: #edf0f2;
+  --surface: #ffffff;
+  --ink: #15212b;
+  --muted: #566672;
+  --line: #c9d2d9;
+  --accent: #a85f00;
+  --accent-ink: #ffffff;
+  --field: #f6f8f9;
+  --font-body: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans KR", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e151c; --surface: #151e27; --ink: #e6ecf0; --muted: #93a3b0;
+    --line: #2a3844; --accent: #f0b04a; --accent-ink: #1a1203; --field: #0f171e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e151c; --surface: #151e27; --ink: #e6ecf0; --muted: #93a3b0;
+  --line: #2a3844; --accent: #f0b04a; --accent-ink: #1a1203; --field: #0f171e;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+header { display: flex; flex-direction: column; gap: 8px; }
+h1 { margin: 0; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+.glyphs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 12px; }
+.glyphs i { display: block; background: var(--accent); height: 8px; border-radius: 4px; }
+.glyphs .dot { width: 8px; }
+.glyphs .dash { width: 24px; }
+.glyphs .gap { width: 10px; background: none; }
+.glyphs .wgap { width: 26px; background: none; }
+.lede { margin: 0; color: var(--muted); max-width: 60ch; }
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
+.ctl { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ctl small { font-size: 0.75rem; color: var(--muted); letter-spacing: 0.04em; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--field); }
+.seg button {
+  font: inherit; font-size: 0.875rem; color: var(--ink); background: none; border: 0;
+  padding: 7px 13px; cursor: pointer; white-space: nowrap;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 500; }
+
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field label { font-size: 0.8125rem; color: var(--muted); font-weight: 500; }
+textarea {
+  width: 100%; min-height: 120px; resize: vertical;
+  font: inherit; font-size: 1.0625rem; line-height: 1.7; color: var(--ink);
+  background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px;
+}
+textarea.mono, #out.mono { font-family: var(--font-mono); letter-spacing: 0.04em; }
+#out { min-height: 140px; }
+#out.mono { font-size: 1.125rem; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn {
+  font: inherit; font-size: 0.875rem; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer;
+}
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500; }
+.btn:hover { border-color: var(--accent); }
+button:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#status { font-size: 0.8125rem; color: var(--muted); min-height: 1.4em; }
+
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; }
+summary { cursor: pointer; font-weight: 500; }
+.ref { display: flex; flex-direction: column; gap: 18px; margin-top: 14px; }
+.ref h3 { margin: 0 0 8px; font-size: 0.8125rem; color: var(--muted); font-weight: 500; letter-spacing: 0.04em; }
+.cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
+.cell {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0;
+  background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px;
+}
+.cell b { font-weight: 500; }
+.cell code { font-family: var(--font-mono); font-size: 0.8125rem; color: var(--accent); letter-spacing: 0.06em; }
+.note { margin: 0; font-size: 0.8125rem; color: var(--muted); max-width: 64ch; }
+
+@media (max-width: 520px) {
+  h1 { font-size: 1.5rem; }
+  .panel { padding: 14px; }
+  .seg button { padding: 7px 10px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+</head>
+<body>
+<main>
+  <header>
+    <h1>모스 부호 변환기</h1>
+    <div class="glyphs" id="titleGlyphs" aria-hidden="true"></div>
+    <p class="lede">한글, 영어, 숫자를 모스 부호로 바꾸거나, 모스 부호를 글자로 되돌립니다. 결과는 바로 복사할 수 있습니다.</p>
+  </header>
+
+  <section class="panel" aria-label="변환기">
+    <div class="controls">
+      <div class="ctl">
+        <small>방향</small>
+        <div class="seg" id="segDir" role="group" aria-label="변환 방향">
+          <button type="button" data-v="enc" aria-pressed="true">글자 → 모스</button>
+          <button type="button" data-v="dec" aria-pressed="false">모스 → 글자</button>
+        </div>
+      </div>
+      <div class="ctl" id="langCtl" hidden>
+        <small>되돌릴 언어</small>
+        <div class="seg" id="segLang" role="group" aria-label="되돌릴 언어">
+          <button type="button" data-v="ko" aria-pressed="true">한글</button>
+          <button type="button" data-v="en" aria-pressed="false">영어</button>
+        </div>
+      </div>
+      <div class="ctl" id="styleCtl">
+        <small>부호 표기</small>
+        <div class="seg" id="segStyle" role="group" aria-label="부호 표기">
+          <button type="button" data-v="ascii" aria-pressed="true">. -</button>
+          <button type="button" data-v="dot" aria-pressed="false">· −</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="inp" id="inpLabel">변환할 글자</label>
+      <textarea id="inp" spellcheck="false" autocomplete="off" placeholder="예: 안녕 Hello 123">안녕하세요 SOS 119</textarea>
+    </div>
+
+    <div class="field">
+      <label for="out" id="outLabel">모스 부호</label>
+      <textarea id="out" class="mono" readonly spellcheck="false"></textarea>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="btn primary" id="copyBtn">결과 복사</button>
+      <button type="button" class="btn" id="playBtn">소리 재생</button>
+      <button type="button" class="btn" id="swapBtn">입력과 결과 바꾸기</button>
+      <button type="button" class="btn" id="clearBtn">지우기</button>
+    </div>
+    <div id="status" role="status" aria-live="polite"></div>
+  </section>
+
+  <details>
+    <summary>부호표 보기</summary>
+    <div class="ref" id="ref"></div>
+  </details>
+
+  <p class="note">글자 사이는 공백 한 칸, 단어 사이는 ' / '로 나눕니다. 모스 부호를 입력할 때는 점(. · •)과 선(- − _) 어느 쪽을 써도 됩니다.</p>
+</main>
+
+<script>
+/*LOGIC-START*/
+const EN = {A:'.-',B:'-...',C:'-.-.',D:'-..',E:'.',F:'..-.',G:'--.',H:'....',I:'..',J:'.---',K:'-.-',L:'.-..',M:'--',N:'-.',O:'---',P:'.--.',Q:'--.-',R:'.-.',S:'...',T:'-',U:'..-',V:'...-',W:'.--',X:'-..-',Y:'-.--',Z:'--..',
+'0':'-----','1':'.----','2':'..---','3':'...--','4':'....-','5':'.....','6':'-....','7':'--...','8':'---..','9':'----.',
+'.':'.-.-.-',',':'--..--','?':'..--..','!':'-.-.--','/':'-..-.','(':'-.--.',')':'-.--.-','&':'.-...',':':'---...',';':'-.-.-.','=':'-...-','+':'.-.-.','-':'-....-','_':'..--.-','"':'.-..-.',"'":'.----.','$':'...-..-','@':'.--.-.'};
+const KO = {'ㄱ':'.-..','ㄴ':'..-.','ㄷ':'-...','ㄹ':'...-','ㅁ':'--','ㅂ':'.--','ㅅ':'--.','ㅇ':'-.-','ㅈ':'.--.','ㅊ':'-.-.','ㅋ':'-..-','ㅌ':'--..','ㅍ':'---','ㅎ':'.---',
+'ㅏ':'.','ㅑ':'..','ㅓ':'-','ㅕ':'...','ㅗ':'.-','ㅛ':'-.','ㅜ':'....','ㅠ':'.-.','ㅡ':'-..','ㅣ':'..-','ㅐ':'--.-','ㅔ':'-.--'};
+const rev = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [v, k]));
+const EN_REV = rev(EN), KO_REV = rev(KO);
+
+const INIT = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+const VOWEL_ALL = 'ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ';
+const FIN = ['', 'ㄱ','ㄲ','ㄳ','ㄴ','ㄵ','ㄶ','ㄷ','ㄹ','ㄺ','ㄻ','ㄼ','ㄽ','ㄾ','ㄿ','ㅀ','ㅁ','ㅂ','ㅄ','ㅅ','ㅆ','ㅇ','ㅈ','ㅊ','ㅋ','ㅌ','ㅍ','ㅎ'];
+const DBL = {'ㄲ':'ㄱㄱ','ㄸ':'ㄷㄷ','ㅃ':'ㅂㅂ','ㅆ':'ㅅㅅ','ㅉ':'ㅈㅈ'};
+const DBL_INIT = {'ㄱ':'ㄲ','ㄷ':'ㄸ','ㅂ':'ㅃ','ㅅ':'ㅆ','ㅈ':'ㅉ'};
+const FINAL_COMBO = {'ㄳ':'ㄱㅅ','ㄵ':'ㄴㅈ','ㄶ':'ㄴㅎ','ㄺ':'ㄹㄱ','ㄻ':'ㄹㅁ','ㄼ':'ㄹㅂ','ㄽ':'ㄹㅅ','ㄾ':'ㄹㅌ','ㄿ':'ㄹㅍ','ㅀ':'ㄹㅎ','ㅄ':'ㅂㅅ'};
+const FINAL_COMBO_REV = Object.assign(rev(FINAL_COMBO), {'ㄱㄱ':'ㄲ','ㅅㅅ':'ㅆ'});
+const VOWEL_COMBO = {'ㅗㅏ':'ㅘ','ㅗㅐ':'ㅙ','ㅗㅣ':'ㅚ','ㅜㅓ':'ㅝ','ㅜㅔ':'ㅞ','ㅜㅣ':'ㅟ','ㅡㅣ':'ㅢ','ㅑㅣ':'ㅒ','ㅕㅣ':'ㅖ','ㅏㅣ':'ㅐ','ㅓㅣ':'ㅔ'};
+const VOWEL_PARTS = {};
+for (const [k, v] of Object.entries(VOWEL_COMBO)) if (v !== 'ㅐ' && v !== 'ㅔ') VOWEL_PARTS[v] = k;
+
+function expandJamo(j) {
+  const s = DBL[j] || FINAL_COMBO[j] || VOWEL_PARTS[j] || j;
+  return Array.from(s);
+}
+
+function encodeChar(ch) {
+  const up = ch.toUpperCase();
+  if (EN[up]) return [EN[up]];
+  const cp = ch.codePointAt(0);
+  let jamos = null;
+  if (cp >= 0xAC00 && cp <= 0xD7A3) {
+    const n = cp - 0xAC00;
+    const T = FIN[n % 28], V = VOWEL_ALL[Math.floor(n / 28) % 21], L = INIT[Math.floor(n / 588)];
+    jamos = [L, V, T].filter(Boolean);
+  } else if (cp >= 0x3131 && cp <= 0x3163) {
+    jamos = [ch];
+  }
+  if (!jamos) return null;
+  const codes = [];
+  for (const j of jamos) for (const b of expandJamo(j)) { if (!KO[b]) return null; codes.push(KO[b]); }
+  return codes;
+}
+
+function encode(text) {
+  const bad = new Set();
+  const lines = text.split(/\r?\n/).map(line => {
+    const words = line.split(/\s+/).filter(Boolean).map(w => {
+      const codes = [];
+      for (const ch of Array.from(w)) {
+        const c = encodeChar(ch);
+        if (c) codes.push(...c); else bad.add(ch);
+      }
+      return codes.join(' ');
+    }).filter(Boolean);
+    return words.join(' / ');
+  });
+  return { text: lines.join('\n'), bad: Array.from(bad) };
+}
+
+function compose(L, v, T) {
+  const li = INIT.indexOf(L), vi = VOWEL_ALL.indexOf(v), ti = T ? FIN.indexOf(T) : 0;
+  if (li < 0 || vi < 0 || ti < 0) return L + v + T;
+  return String.fromCharCode(0xAC00 + (li * 21 + vi) * 28 + ti);
+}
+
+function assemble(list) {
+  const n = list.length;
+  const CONS = 'ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ', VOWS = 'ㅏㅑㅓㅕㅗㅛㅜㅠㅡㅣㅐㅔ';
+  const isV = k => k < n && VOWS.includes(list[k]);
+  const isC = k => k < n && CONS.includes(list[k]);
+  const starts = k => isC(k) && (isV(k + 1) || (list[k] === list[k + 1] && DBL_INIT[list[k]] && isV(k + 2)));
+  let out = '', i = 0;
+  while (i < n) {
+    if (!starts(i)) { out += list[i]; i++; continue; }
+    let L, j;
+    if (isV(i + 1)) { L = list[i]; j = i + 1; } else { L = DBL_INIT[list[i]]; j = i + 2; }
+    let v = list[j]; j++;
+    while (isV(j) && VOWEL_COMBO[v + list[j]]) { v = VOWEL_COMBO[v + list[j]]; j++; }
+    let T = '';
+    if (isC(j) && !starts(j)) {
+      const c = list[j], d = list[j + 1];
+      if (isC(j + 1) && !starts(j + 1) && FINAL_COMBO_REV[c + d]) { T = FINAL_COMBO_REV[c + d]; j += 2; }
+      else { T = c; j += 1; }
+    }
+    out += compose(L, v, T);
+    i = j;
+  }
+  return out;
+}
+
+function normalizeMorse(s) {
+  return s.replace(/[·•∙．]/g, '.').replace(/[−–—―‒_]/g, '-');
+}
+
+function decode(text, lang) {
+  const src = normalizeMorse(text);
+  let unknown = 0;
+  const lines = src.split(/\r?\n/).map(line => {
+    const words = line.split(/\s*\/\s*|\s{3,}/).map(w => w.trim().split(/\s+/).filter(Boolean)).filter(a => a.length);
+    return words.map(tokens => {
+      const items = tokens.map(t => {
+        if (!/^[.-]+$/.test(t)) { unknown++; return { x: '?' }; }
+        if (lang === 'ko') {
+          if (KO_REV[t]) return { j: KO_REV[t] };
+          if (t.length >= 5 && EN_REV[t]) return { x: EN_REV[t] };
+        } else if (EN_REV[t]) return { x: EN_REV[t] };
+        unknown++; return { x: '?' };
+      });
+      let out = '', run = [];
+      for (const it of items) {
+        if (it.j) run.push(it.j);
+        else { out += assemble(run) + it.x; run = []; }
+      }
+      return out + assemble(run);
+    }).join(' ');
+  });
+  return { text: lines.join('\n'), unknown };
+}
+/*LOGIC-END*/
+
+(function () {
+  const $ = id => document.getElementById(id);
+  const inp = $('inp'), out = $('out'), status = $('status');
+  const state = { dir: 'enc', lang: 'ko', style: 'ascii' };
+  let audio = null;
+
+  const toStyle = s => state.style === 'dot' ? s.replace(/\./g, '·').replace(/-/g, '−') : s;
+
+  function glyphs(el, morse) {
+    el.textContent = '';
+    for (const ch of morse) {
+      const i = document.createElement('i');
+      i.className = ch === '.' ? 'dot' : ch === '-' ? 'dash' : ch === '/' ? 'wgap' : 'gap';
+      el.appendChild(i);
+    }
+  }
+
+  function convert() {
+    stopSound();
+    if (state.dir === 'enc') {
+      const r = encode(inp.value);
+      out.value = toStyle(r.text);
+      status.textContent = r.bad.length ? '변환하지 못한 글자: ' + r.bad.join(' ') : '';
+    } else {
+      const r = decode(inp.value, state.lang);
+      out.value = r.text;
+      status.textContent = r.unknown ? '해석하지 못한 부호가 ' + r.unknown + '개 있어 ?로 표시했습니다.' : '';
+    }
+  }
+
+  function applyUi() {
+    const enc = state.dir === 'enc';
+    $('langCtl').hidden = enc;
+    $('styleCtl').hidden = !enc;
+    $('inpLabel').textContent = enc ? '변환할 글자' : '변환할 모스 부호';
+    $('outLabel').textContent = enc ? '모스 부호' : (state.lang === 'ko' ? '한글 결과' : '영어 결과');
+    inp.classList.toggle('mono', !enc);
+    out.classList.toggle('mono', enc);
+    inp.placeholder = enc ? '예: 안녕 Hello 123' : '예: ... --- ... / .- -. ...';
+    for (const [id, key] of [['segDir', 'dir'], ['segLang', 'lang'], ['segStyle', 'style']]) {
+      $(id).querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === state[key])));
+    }
+    convert();
+  }
+
+  function bindSeg(id, key) {
+    $(id).addEventListener('click', e => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      const changedDir = key === 'dir' && state.dir !== b.dataset.v;
+      state[key] = b.dataset.v;
+      if (changedDir) { inp.value = ''; }
+      applyUi();
+    });
+  }
+  bindSeg('segDir', 'dir'); bindSeg('segLang', 'lang'); bindSeg('segStyle', 'style');
+  inp.addEventListener('input', convert);
+
+  function flash(btn, msg) {
+    const old = btn.dataset.label || btn.textContent;
+    btn.dataset.label = old;
+    btn.textContent = msg;
+    setTimeout(() => { btn.textContent = old; }, 1400);
+  }
+
+  $('copyBtn').addEventListener('click', e => {
+    const btn = e.currentTarget, text = out.value;
+    if (!text) { status.textContent = '복사할 결과가 없습니다.'; return; }
+    const fallback = () => {
+      out.focus(); out.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+      flash(btn, ok ? '복사됨' : '선택됨, 길게 눌러 복사');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => flash(btn, '복사됨')).catch(fallback);
+    } else fallback();
+  });
+
+  $('clearBtn').addEventListener('click', () => { inp.value = ''; convert(); inp.focus(); });
+
+  $('swapBtn').addEventListener('click', () => {
+    const hadHangul = /[ㄱ-ㅣ가-힣]/.test(inp.value);
+    const result = out.value;
+    if (state.dir === 'enc') { state.dir = 'dec'; state.lang = hadHangul ? 'ko' : 'en'; }
+    else { state.dir = 'enc'; }
+    inp.value = result;
+    applyUi();
+  });
+
+  function stopSound() {
+    if (audio) { try { audio.close(); } catch (e) {} audio = null; }
+    $('playBtn').textContent = '소리 재생';
+  }
+
+  $('playBtn').addEventListener('click', () => {
+    if (audio) { stopSound(); return; }
+    const morse = normalizeMorse(state.dir === 'enc' ? out.value : inp.value);
+    if (!/[.-]/.test(morse)) { status.textContent = '재생할 부호가 없습니다.'; return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { status.textContent = '이 화면에서는 소리를 재생할 수 없습니다.'; return; }
+    try {
+      audio = new AC();
+      const osc = audio.createOscillator(), gain = audio.createGain();
+      osc.frequency.value = 640; gain.gain.value = 0;
+      osc.connect(gain); gain.connect(audio.destination);
+      const unit = 0.08;
+      let t = audio.currentTime + 0.1;
+      const chars = Array.from(morse.replace(/\n/g, ' / '));
+      chars.forEach((ch, idx) => {
+        if (ch === '.' || ch === '-') {
+          const d = (ch === '.' ? 1 : 3) * unit;
+          gain.gain.setValueAtTime(0.25, t);
+          gain.gain.setValueAtTime(0, t + d);
+          t += d;
+          const nx = chars[idx + 1];
+          if (nx === '.' || nx === '-') t += unit;
+        } else if (ch === ' ') t += 2 * unit;
+        else if (ch === '/') t += 4 * unit;
+      });
+      osc.start();
+      osc.stop(t + 0.1);
+      const ctx = audio;
+      osc.onended = () => { if (audio === ctx) stopSound(); };
+      $('playBtn').textContent = '재생 멈추기';
+    } catch (err) { stopSound(); status.textContent = '이 화면에서는 소리를 재생할 수 없습니다.'; }
+  });
+
+  function buildRef() {
+    const groups = [
+      ['한글 자음', 'ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ', KO],
+      ['한글 모음', 'ㅏㅑㅓㅕㅗㅛㅜㅠㅡㅣㅐㅔ', KO],
+      ['영문', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', EN],
+      ['숫자', '0123456789', EN],
+      ['부호', '.,?!/()&:;=+-_"\'$@', EN]
+    ];
+    const root = $('ref');
+    for (const [title, chars, map] of groups) {
+      const sec = document.createElement('div');
+      const h = document.createElement('h3'); h.textContent = title;
+      const grid = document.createElement('div'); grid.className = 'cells';
+      for (const ch of Array.from(chars)) {
+        const c = document.createElement('div'); c.className = 'cell';
+        const b = document.createElement('b'); b.textContent = ch;
+        const code = document.createElement('code'); code.textContent = map[ch];
+        c.append(b, code); grid.appendChild(c);
+      }
+      sec.append(h, grid); root.appendChild(sec);
+    }
+    const p = document.createElement('p'); p.className = 'note';
+    p.textContent = '쌍자음(ㄲ ㄸ ㅃ ㅆ ㅉ), 겹받침(ㄳ ㄺ 등), 겹모음(ㅘ ㅟ ㅢ 등)은 기본 글자를 이어서 씁니다. 예: ㅘ = ㅗ + ㅏ. 한글을 되돌릴 때는 ㅇ을 포함한 글자 순서로 음절을 다시 조립하므로, 받침과 다음 글자의 경계가 헷갈리는 경우에는 결과를 한 번 확인해 주세요.';
+    root.appendChild(p);
+  }
+
+  glyphs($('titleGlyphs'), encode('모스 부호').text);
+  buildRef();
+  applyUi();
+})();
+</script>
+</body>
+</html>
